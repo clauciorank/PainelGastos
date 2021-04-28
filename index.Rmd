@@ -1,0 +1,208 @@
+---
+title: "Money control"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(shinyWidgets)
+library(DT)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+```
+
+
+Current Month
+=========================================================================
+
+{.sidebar}
+-----------------------------------------------------------------------
+
+
+```{r}
+currencyInput('income', 'Income: ', format = 'Brazilian', value = 0)
+
+textInput('incomedescription', 'Description')
+
+dateInput('dateincome', label = 'Date: ', value = Sys.Date(), format = 'dd/mm/yyyy')
+
+actionBttn('inputaction','Add income', style = 'jelly')
+
+
+currencyInput('payment', 'Payments: ', format = 'Brazilian', value = 0)
+dateInput('dateoutcome', label = 'Date: ', value = Sys.Date(), format = 'dd/mm/yyyy')
+selectInput('categoria', 'Category: ', choices = c('Credit Card','Food', 'Household', 'Transport', 'Clothes', 'Travel', 'Health', 'Electronics', 'Education','Leisure', 'Sons','Debts', 'Others'))
+textInput('paydescription', 'Description: ')
+actionBttn('paymentaction','Add Payment', style = 'jelly')
+dateInput('startperiod', label = 'Start Date: ', value = Sys.Date()-30, format = 'dd/mm/yyyy')
+dateInput('endperiod', label = 'End Date: ', value = Sys.Date(), format = 'dd/mm/yyyy')
+actionBttn('datafilteraction','Filter period', style = 'jelly')
+```
+
+```{r}
+## Stamp Function to PT-BR
+st <- stamp('30/12/1990')
+## Income table reactive
+incdf <- reactiveValues(df = read.csv('Incomes.csv'))
+
+observeEvent(input$inputaction,{
+             datechar <- as.character.Date(input$dateincome)
+             newline <- c(datechar, input$income, input$incomedescription)
+             incdf$df <- rbind(incdf$df, newline)
+             incdf$df$Value <- as.numeric(incdf$df$Value)
+             incdf$df$Date <- ymd(incdf$df$Date)
+             incdf$df$Dateposi <- as.Date(incdf$df$Date)
+             write.csv(incdf$df, 'Incomes.csv', row.names = F)
+             })
+observeEvent(input$datafilteraction,{
+            incdf$df$Value <- as.numeric(incdf$df$Value)
+            incdf$df$Dateposi <- ymd(incdf$df$Date)  
+            incdf$df <- incdf$df %>%filter(Dateposi >= input$startperiod & Date <= input$endperiod)
+})
+
+
+
+
+# Payments table reactive
+outdf <- reactiveValues(df = read.csv('Payments.csv'))
+
+observeEvent(input$paymentaction,{
+             datechara <- as.character.Date(input$dateoutcome)
+             newlinea <- c(datechara, input$payment, input$paydescription, input$categoria)
+             outdf$df <- rbind(outdf$df, newlinea)
+             outdf$df$Value <- as.numeric(outdf$df$Value)
+             outdf$df$Date <- ymd(outdf$df$Date)
+             outdf$df$Dateposi <- as.Date(outdf$df$Date)
+             write.csv(outdf$df, 'Payments.csv', row.names = F)
+             })
+
+observeEvent(input$datafilteraction,{
+            outdf$df$Value <- as.numeric(outdf$df$Value)
+            outdf$df$Dateposi <- ymd(outdf$df$Date)  
+            outdf$df <- outdf$df %>% filter(Dateposi >= input$startperiod & Date <= input$endperiod)
+})
+
+
+```
+
+
+
+Column {data-width=200} 
+-----------------------------------------------------------------------
+### 
+```{r}
+renderValueBox(valueBox(
+  value = paste(st(input$startperiod), '-', st(input$endperiod)), 'Current Period', color = 'primary'))
+
+```
+
+### 
+```{r}
+
+renderValueBox( valueBox(value = sum(incdf$df$Value), 'Incomes', color = 'success'))
+
+```
+
+### 
+```{r}
+renderValueBox(valueBox(value = sum(outdf$df$Value), 'Payments', color = 'danger'))
+```
+
+###
+```{r}
+renderValueBox({
+  balance <- sum(incdf$df$Value) - sum(outdf$df$Value)
+  if (balance > 0) {
+  valueBox(value = balance, 'Balance', color = 'success')  
+  }
+  else{
+    valueBox(value = balance, 'Balance', color = 'danger')
+  }
+  })
+
+
+```
+
+
+Column{.tabset .tabset-fade}
+-----
+
+### Graph
+
+```{r}
+renderPlot({
+
+# Barchart
+  plott <- data.frame(Value = c(incdf$df$Value,outdf$df$Value), 
+                      Type = c(rep('Income', length(incdf$df$Value)), 
+                        rep('Outcome', length(outdf$df$Value))))
+  plott <- plott %>% group_by(Type) %>% summarise(Value = sum(Value))
+  g1 <- ggplot(plott, aes(x = Type, y = Value,  group = Type, fill = Type)) + 
+        geom_bar(stat = 'identity')+
+        geom_text(aes(label = Value, color = Type), vjust = -.5, size = 7)+
+        theme_minimal()+theme(legend.position = 'none',text = element_text(size=20))+
+        labs(x = NULL, y = 'Value (R$)')+
+        scale_fill_manual(values=c("#74c758", "#fb4870"))+
+        scale_color_manual(values=c("#74c758", "#fb4870"))
+
+# PieCHART
+  
+b <- outdf$df
+b <- b %>% group_by(Category) %>% summarise(Value = sum(Value))  
+
+g2 <- ggplot(b, aes(x = '', y = Value, fill = Category))+
+ geom_bar(stat = 'identity')+ 
+  geom_text(aes(label = paste0(Category,'\n', 'R$',Value,'\n', 
+                               " (",
+                               scales::percent(Value / sum(Value)),                                                                                   ")")), 
+            position = position_stack(vjust = 0.5), size = 5)+
+  coord_polar('y')+theme_void()+theme(legend.position = 'none')
+
+cowplot::plot_grid(g1,g2, nrow = 1)  
+  
+  
+})
+```
+
+
+
+### Table Incomes
+
+```{r}
+
+###Reactive table without UTF Format
+tabledf <- reactive({
+  table <- incdf$df[-1,-4]
+  table$Date <- ymd(table$Date)
+  table$Date <- st(table$Date)
+  return(table)})
+
+
+renderTable(tabledf())
+
+
+```
+
+### Table Payments
+
+```{r}
+tableout <- reactive({
+  tableo <- outdf$df[-1,-5]
+  
+  tableo$Date <- ymd(tableo$Date)
+  tableo$Date <- st(tableo$Date)
+  return(tableo)
+})
+
+
+renderTable(tableout())
+
+```
+
+
